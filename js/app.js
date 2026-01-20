@@ -157,19 +157,20 @@ class SetupView {
     }
 
     render() {
+        const selectedDetails = GameTypeDetails[this.state.gameType];
         this.container.innerHTML = `
             <div class="setup-container fade-in">
                 <header style="margin-bottom: var(--spacing-lg)">
                     <h1>New Round</h1>
-                    <p class="subtitle">Game Setup</p>
                 </header>
 
-                <section class="input-group">
-                    <label>Game Mode</label>
+                <section class="input-group" style="margin-bottom: var(--spacing-md);">
+                    <label style="color: var(--accent-primary); font-weight: 600; font-size: 0.85rem; text-transform: uppercase; letter-spacing: 0.5px;">Game Mode</label>
                     <div class="game-type-grid" style="
                         display: grid;
                         grid-template-columns: repeat(5, 1fr);
                         gap: var(--spacing-xs);
+                        margin-top: var(--spacing-xs);
                     ">
                         ${Object.values(GameTypes).map(type => {
             const details = GameTypeDetails[type];
@@ -178,57 +179,63 @@ class SetupView {
                                 <div class="glass-panel game-option ${isActive ? 'active' : ''}" 
                                      data-type="${type}"
                                      style="
-                                        padding: var(--spacing-xs); 
+                                        padding: var(--spacing-xs) 4px;
+                                        min-height: 58px;
                                         text-align: center; 
                                         cursor: pointer; 
                                         border: 2px solid ${isActive ? 'var(--accent-primary)' : 'transparent'};
                                         background: ${isActive ? 'rgba(163, 230, 53, 0.1)' : 'var(--card-bg)'};
                                         transition: var(--transition-fast);
+                                        display: flex;
+                                        flex-direction: column;
+                                        align-items: center;
+                                        justify-content: center;
                                      ">
-                                    <div style="font-size: 1.25rem; margin-bottom: 2px;">${details.icon}</div>
-                                    <div style="font-size: 0.55rem; font-weight: 600; line-height: 1.2;">${details.label}</div>
+                                    <div style="font-size: 1.1rem; margin-bottom: 3px;">${details.icon}</div>
+                                    <div style="font-size: 0.55rem; font-weight: 600; line-height: 1.15; word-break: break-word;">${details.label}</div>
                                 </div>
                             `;
         }).join('')}
                     </div>
-                    <div style="display: flex; gap: var(--spacing-xs); margin-top: var(--spacing-xs);">
-                        <div id="game-mode-description" class="glass-panel" style="
-                            flex: 1;
-                            padding: var(--spacing-xs) var(--spacing-sm);
-                            font-size: 0.8rem;
-                            color: var(--text-muted);
-                            text-align: center;
-                        ">
-                            ${GameTypeDetails[this.state.gameType].description}
+                    <div id="game-mode-description" class="glass-panel" style="
+                        margin-top: var(--spacing-sm);
+                        padding: var(--spacing-sm);
+                        text-align: center;
+                    ">
+                        <div style="margin-bottom: var(--spacing-xs);">
+                            <span style="font-size: 1rem;">${selectedDetails.icon}</span>
+                            <strong style="color: var(--text-main); margin-left: 4px;">${selectedDetails.label}</strong>
+                            <span style="color: var(--text-muted);"> — ${selectedDetails.description}</span>
                         </div>
                         <button id="view-rules-btn" class="btn" style="
-                            background: rgba(255,255,255,0.08);
+                            background: rgba(255,255,255,0.06);
                             border: 1px solid var(--card-border);
-                            color: var(--text-main);
-                            padding: var(--spacing-xs) var(--spacing-sm);
-                            font-size: 0.75rem;
-                        ">📖 Rules</button>
+                            color: var(--text-muted);
+                            padding: 4px 14px;
+                            font-size: 0.7rem;
+                            border-radius: 20px;
+                        ">📖 View Rules</button>
                     </div>
                 </section>
 
-                <section class="input-group">
-                    <label>Hole Count</label>
-                    <div class="glass-panel flex-center gap-sm" style="padding: var(--spacing-xs);">
-                        <button class="btn btn-icon" id="dec-holes">−</button>
-                        <span id="hole-count-display" style="font-weight: 700; min-width: 40px; text-align: center;">${this.state.holeCount}</span>
-                        <button class="btn btn-icon" id="inc-holes">+</button>
+                <section class="input-group" style="margin-bottom: var(--spacing-md);">
+                    <label style="color: var(--accent-primary); font-weight: 600; font-size: 0.85rem; text-transform: uppercase; letter-spacing: 0.5px;">Course Settings</label>
+                    <div style="display: flex; gap: var(--spacing-sm); margin-top: var(--spacing-xs);">
+                        <div class="glass-panel flex-center gap-sm" style="flex: 1; padding: var(--spacing-xs);">
+                            <span style="font-size: 0.8rem; color: var(--text-muted);">Holes</span>
+                            <button class="btn btn-icon" id="dec-holes">−</button>
+                            <span id="hole-count-display" style="font-weight: 700; min-width: 40px; text-align: center;">${this.state.holeCount}</span>
+                            <button class="btn btn-icon" id="inc-holes">+</button>
+                        </div>
+                        <button id="customize-pars-btn" class="btn" style="background: rgba(255,255,255,0.08); border: 1px solid var(--card-border); color: var(--text-main); padding: var(--spacing-xs) var(--spacing-sm);">
+                            ⚙️ Pars
+                        </button>
                     </div>
                 </section>
 
-                <section class="input-group">
-                    <button id="customize-pars-btn" class="btn" style="background: rgba(255,255,255,0.08); border: 1px dashed var(--card-border); color: var(--text-main);">
-                        ⚙️ Customize Pars
-                    </button>
-                </section>
-
-                <section class="input-group">
-                    <label>Players</label>
-                    <div id="player-list" style="display: flex; flex-direction: column; gap: var(--spacing-sm);">
+                <section class="input-group" style="margin-bottom: var(--spacing-md);">
+                    <label style="color: var(--accent-primary); font-weight: 600; font-size: 0.85rem; text-transform: uppercase; letter-spacing: 0.5px;">Players</label>
+                    <div id="player-list" style="display: flex; flex-direction: column; gap: var(--spacing-sm); margin-top: var(--spacing-xs);">
                         <!-- Players injected here -->
                     </div>
                     <button id="add-player-btn" class="btn" style="margin-top: var(--spacing-sm); background: rgba(255,255,255,0.08); border: 1px dashed var(--card-border); color: var(--text-main);">
@@ -236,7 +243,7 @@ class SetupView {
                     </button>
                 </section>
 
-                <button id="start-game-btn" class="btn btn-primary" style="margin-top: var(--spacing-md)">
+                <button id="start-game-btn" class="btn btn-primary" style="margin-top: var(--spacing-sm)">
                     Start Round
                 </button>
             </div>
@@ -274,7 +281,15 @@ class SetupView {
                 // Update description
                 const desc = document.getElementById('game-mode-description');
                 if (desc) {
-                    desc.textContent = GameTypeDetails[this.state.gameType].description;
+                    const details = GameTypeDetails[this.state.gameType];
+                    const textDiv = desc.querySelector('div');
+                    if (textDiv) {
+                        textDiv.innerHTML = `
+                            <span style="font-size: 1rem;">${details.icon}</span>
+                            <strong style="color: var(--text-main); margin-left: 4px;">${details.label}</strong>
+                            <span style="color: var(--text-muted);"> — ${details.description}</span>
+                        `;
+                    }
                 }
             });
         });

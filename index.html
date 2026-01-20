@@ -1,20 +1,38 @@
 <!DOCTYPE html>
 <html lang="en">
+
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Disc Golf Scorer</title>
-    <meta name="description" content="Premium Disc Golf Scoring Application">
-    
+    <title>Chain Games - Disc Golf Scorer</title>
+    <meta name="description" content="Chain Games - Disc Golf Scoring & Game Modes">
+
     <!-- Fonts -->
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Outfit:wght@500;700;800&display=swap" rel="stylesheet">
-    
+    <link
+        href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Outfit:wght@500;700;800&display=swap"
+        rel="stylesheet">
+
     <link rel="stylesheet" href="index.css">
 </head>
+
 <body>
     <div id="app">
+        <header id="app-header" style="
+            text-align: center;
+            padding: 12px 0 8px;
+            border-bottom: 1px solid rgba(255,255,255,0.08);
+            margin-bottom: 8px;
+        ">
+            <div style="
+                font-family: 'Outfit', sans-serif;
+                font-size: 1.1rem;
+                font-weight: 700;
+                color: var(--accent-primary);
+                letter-spacing: 1px;
+            ">🥏 CHAIN GAMES</div>
+        </header>
         <!-- Views will be injected here via app.js -->
         <main id="main-content" class="fade-in">
             <div class="loading-spinner"></div>
@@ -24,4 +42,5 @@
     <!-- Application Script -->
     <script type="module" src="js/app.js"></script>
 </body>
+
 </html>
