@@ -37,7 +37,11 @@ export const createInitialState = () => ({
     scores: {}, // Key: `${holeIndex}_${playerId}` -> score
     currentHole: 1, // 1-based index
     isActive: true,
-    isFinished: false
+    isFinished: false,
+    wolfData: {
+        history: {}, // holeIndex -> { wolfId, partnerId, betType, winningTeam, potValue }
+        pot: 0
+    }
 });
 
 export const saveGame = (state) => {
@@ -74,4 +78,27 @@ export const removePlayer = (state, playerId) => {
     });
 
     return state;
+};
+
+/**
+ * Soft-remove a player for Wolf mode.
+ * Marks the player as removed from a specific hole onward.
+ * Player retains scores for holes before removal.
+ */
+export const softRemovePlayer = (state, playerId, currentHole) => {
+    const player = state.players.find(p => p.id === playerId);
+    if (player) {
+        player.removedAtHole = currentHole;
+    }
+    return state;
+};
+
+/**
+ * Get active players for a specific hole.
+ * Filters out players who were removed before the given hole.
+ */
+export const getActivePlayers = (players, holeNumber) => {
+    return players.filter(p =>
+        !p.removedAtHole || p.removedAtHole > holeNumber
+    );
 };

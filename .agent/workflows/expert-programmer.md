@@ -14,9 +14,8 @@ Read `implementation_plan.md` to understand exactly what needs to be built or fi
 - Focus on professional UI/UX if applicable.
 - Follow best practices and existing project patterns.
 - **Do not** update the plan; only execute it.
+- **Do NOT** perform browser testing, UI verification, or any automated testing in the browser. The user will handle all QA testing manually.
 
-## 3. Hand Off to QA
-Once implementation is complete, call the QA Specialist to verify your work.
-> "Implementation complete. Please verify using the `qa-specialist` workflow."
-
-Call /qa-specialist
+## 3. Hand Off to User
+Once implementation is complete, notify the user so they can test the changes.
+> "Implementation complete. Please test the changes and let me know if you'd like any adjustments or if we should continue to the next feature."

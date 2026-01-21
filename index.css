@@ -107,14 +107,12 @@
     transform: translateY(0) scale(1);
 }
 
-/* Scoreboard Grid */
 /* Scoreboard Split-Pane Layout */
 .scoreboard-container {
     display: flex;
     border: 1px solid var(--card-border);
     border-radius: var(--radius-sm);
     overflow: hidden;
-    /* Contains the scroll */
     margin-top: var(--spacing-sm);
     background: var(--card-bg);
 }
@@ -123,7 +121,6 @@
     flex-shrink: 0;
     z-index: 2;
     background: var(--bg-dark);
-    /* Ensure it covers scroll content */
     border-right: 1px solid var(--card-border);
     box-shadow: 4px 0 12px rgba(0, 0, 0, 0.2);
 }
@@ -135,52 +132,76 @@
     background: transparent;
 }
 
-/* Common Table Styles for Alignment */
+/* Common Table Styles */
 .sc-table {
     border-collapse: collapse;
     width: auto;
-    /* Width determined by content */
 }
 
 .sc-table th,
 .sc-table td {
-    padding: 0 4px;
-    /* Reduced from 12px */
-    height: 48px;
-    /* FIXED HEIGHT FOR SYNC */
-    min-width: 32px;
-    /* Enforce narrower constraint */
+    padding: 0 8px;
+    /* Standardize padding */
+    height: 48px !important;
+    /* Force data row height */
     line-height: 48px;
-    /* Vertically center */
+    /* Center vertically */
     border-bottom: 1px solid var(--card-border);
     white-space: nowrap;
     text-align: center;
+    box-sizing: border-box;
+    vertical-align: middle;
+}
+
+/* Header Specifics */
+.sc-table thead {
+    background: rgba(255, 255, 255, 0.03);
+    /* Seamless background */
 }
 
 .sc-table th {
-    height: 40px;
-    /* Header slightly shorter? Or same? Let's match for safety */
-    line-height: 40px;
+    height: 32px !important;
+    /* Force header row height to 32px (includes borders) */
+    line-height: 32px;
     font-size: 0.75rem;
     font-weight: 600;
     color: var(--text-muted);
     text-transform: uppercase;
-    background: rgba(255, 255, 255, 0.03);
+    /* background removed from here */
+}
+
+/* Helper to merge cells visually */
+.no-bottom-border {
+    border-bottom: none !important;
+}
+
+/* Vertically center text across 2 rows (32px * 2 = 64px)
+   pushes text down from top row center to combined center */
+.sc-header-offset {
+    transform: translateY(16px);
 }
 
 .sc-cell-player {
     text-align: left;
     font-weight: 700;
     color: var(--accent-primary);
-    min-width: 120px;
-    max-width: 160px;
+    min-width: 100px;
+    max-width: 140px;
     overflow: hidden;
     text-overflow: ellipsis;
 }
 
 .sc-cell-total {
     font-weight: 700;
-    min-width: 60px;
+    min-width: 50px;
+    text-align: center;
+}
+
+/* Header cells for holes */
+.sc-hole-header,
+.sc-par-header {
+    min-width: 36px;
+    padding: 0 2px;
 }
 
 /* Utilities */
@@ -239,6 +260,8 @@ h1 {
     font-weight: 800;
     background: linear-gradient(135deg, var(--text-main) 0%, var(--text-muted) 100%);
     -webkit-background-clip: text;
+    background-clip: text;
+    /* Fix lint warning */
     -webkit-text-fill-color: transparent;
     margin-bottom: var(--spacing-md);
 }
