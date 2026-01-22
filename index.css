@@ -204,6 +204,18 @@
     padding: 0 2px;
 }
 
+/* Match Play pair separator */
+.sc-pair-spacer td {
+    height: 4px;
+    padding: 0;
+    border: none;
+    background: linear-gradient(to right,
+            transparent 0%,
+            rgba(255, 255, 255, 0.08) 20%,
+            rgba(255, 255, 255, 0.08) 80%,
+            transparent 100%);
+}
+
 /* Utilities */
 .text-danger {
     color: var(--danger);

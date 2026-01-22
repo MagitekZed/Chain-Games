@@ -63,6 +63,20 @@ class Modal {
 }
 
 function calculateTotal(playerId) {
+    // Match Play: Count hole wins (requires special logic)
+    if (appState.gameType === GameTypes.MATCH_PLAY) {
+        const pairs = appState.config.matchPlayData?.pairs || [];
+        const pair = pairs.find(p => p.player1Id === playerId || p.player2Id === playerId);
+        if (!pair) return 0;
+
+        let wins = 0;
+        for (let h = 1; h <= appState.config.holeCount; h++) {
+            const winner = getMatchPlayHoleWinner(pair, h);
+            if (winner === playerId) wins++;
+        }
+        return wins;
+    }
+
     let total = 0;
     Object.keys(appState.scores).forEach(key => {
         if (key.endsWith(`_${playerId}`)) {
@@ -72,6 +86,13 @@ function calculateTotal(playerId) {
 
             if (appState.gameType === GameTypes.WOLF) {
                 total += score; // Points
+            } else if (appState.gameType === GameTypes.BINGO_BANGO_BONGO) {
+                // Score is a BITMASK: 1=Bingo, 2=Bango, 4=Bongo.
+                // We need to count set bits to get point total.
+                const p1 = score & 1;
+                const p2 = (score >> 1) & 1;
+                const p3 = (score >> 2) & 1;
+                total += (p1 + p2 + p3);
             } else if (appState.gameType === GameTypes.BIRDIE_OR_DIE) {
                 // Points only for under par: Birdie=1, Eagle=3, Albatross+=5
                 const underPar = par - score;
@@ -88,7 +109,7 @@ function calculateTotal(playerId) {
 }
 
 function calculateTotalStrokes(playerId) {
-    if (appState.gameType === GameTypes.WOLF) return 0; // Avg strokes doesn't apply cleanly
+    if (appState.gameType === GameTypes.WOLF || appState.gameType === GameTypes.BINGO_BANGO_BONGO) return 0; // Avg strokes doesn't apply cleanly
 
     let total = 0;
     Object.keys(appState.scores).forEach(key => {
@@ -104,24 +125,59 @@ function generateScoreboardHTML(players, config, scores) {
     const holes = Array.from({ length: holeCount }, (_, k) => k + 1);
     const isWolfMode = appState.gameType === GameTypes.WOLF;
     const isBirdieMode = appState.gameType === GameTypes.BIRDIE_OR_DIE;
-    const isPointsMode = isWolfMode || isBirdieMode;
+    const isPointsMode = isWolfMode || isBirdieMode || appState.gameType === GameTypes.BINGO_BANGO_BONGO || appState.gameType === GameTypes.MATCH_PLAY;
     const hideParRow = isWolfMode;
 
     // Left Pane Data Rows
-    const leftRows = players.map(p => {
+    const leftRows = players.map((p, playerIndex) => {
         let currentTotal = calculateTotal(p.id);
         let displayTotal;
-        if (isPointsMode) {
+
+        // Match Play: Show "X UP, Y left" notation
+        if (appState.gameType === GameTypes.MATCH_PLAY) {
+            const pairs = appState.config.matchPlayData?.pairs || [];
+            const pair = pairs.find(pr => pr.player1Id === p.id || pr.player2Id === p.id);
+            if (pair && pair.player2Id) {
+                const status = getMatchPlayStatus(pair);
+                const holesPlayed = Object.keys(scores).filter(k => {
+                    const [hole, pid] = k.split('_');
+                    return pid === pair.player1Id || pid === pair.player2Id;
+                }).length / 2; // Approximate holes played
+                const holesLeft = config.holeCount - Math.floor(holesPlayed);
+
+                if (status.leaderId === p.id) {
+                    displayTotal = `${status.status}`;
+                } else if (status.leaderId === null) {
+                    displayTotal = 'AS'; // All Square abbreviation
+                } else {
+                    // This player is down
+                    const diff = status.status.replace(' UP', '');
+                    displayTotal = `${diff} DN`;
+                }
+            } else {
+                displayTotal = 'Bye';
+            }
+        } else if (isPointsMode) {
             displayTotal = currentTotal;
         } else {
             const sign = currentTotal > 0 ? '+' : '';
             displayTotal = currentTotal === 0 ? 'E' : (currentTotal > 0 ? sign + currentTotal : currentTotal);
         }
+
+        // For Match Play, add spacer after every pair (every 2 players)
+        const isMatchPlay = appState.gameType === GameTypes.MATCH_PLAY;
+        const isEndOfPair = isMatchPlay && (playerIndex % 2 === 1) && (playerIndex < players.length - 1);
+
+        const spacerRow = isEndOfPair
+            ? `<tr class="sc-pair-spacer"><td colspan="2"></td></tr>`
+            : '';
+
         return `
             <tr>
                 <td class="sc-cell-player">${p.name}</td>
                 <td class="sc-cell-total">${displayTotal}</td>
             </tr>
+            ${spacerRow}
         `;
     }).join('');
 
@@ -181,6 +237,38 @@ function generateScoreboardHTML(players, config, scores) {
                     else if (underPar === 1) points = 1;
                     const colorStyle = points > 0 ? 'color: var(--accent-primary);' : 'color: var(--text-muted);';
                     return `<td style="${colorStyle}">${points}</td>`;
+                } else if (appState.gameType === GameTypes.BINGO_BANGO_BONGO) {
+                    // val is bitmask
+                    const p1 = val & 1;
+                    const p2 = (val >> 1) & 1;
+                    const p3 = (val >> 2) & 1;
+                    const points = p1 + p2 + p3;
+                    const colorStyle = points > 0 ? 'color: var(--accent-primary);' : 'color: var(--text-muted);';
+                    // Optional: tooltip or symbols to show WHICH points?
+                    // For now, strict point total is cleanest for grid.
+                    return `<td style="${colorStyle}">${points}</td>`;
+                } else if (appState.gameType === GameTypes.MATCH_PLAY) {
+                    // Show actual strokes: winner=green, loser=grey, tie=white
+                    const pairs = appState.config.matchPlayData?.pairs || [];
+                    const pair = pairs.find(pr => pr.player1Id === p.id || pr.player2Id === p.id);
+                    if (pair && pair.player2Id) {
+                        // Get opponent's score
+                        const opponentId = pair.player1Id === p.id ? pair.player2Id : pair.player1Id;
+                        const opponentScore = scores[`${h}_${opponentId}`];
+
+                        let colorStyle = 'color: var(--text-main);'; // Default white for tie
+                        if (opponentScore !== undefined) {
+                            if (val < opponentScore) {
+                                colorStyle = 'color: var(--success); font-weight: 700;'; // Winner - green
+                            } else if (val > opponentScore) {
+                                colorStyle = 'color: var(--text-muted);'; // Loser - grey
+                            }
+                            // Equal = white (default)
+                        }
+                        return `<td style="${colorStyle}">${val}</td>`;
+                    }
+                    // Solo/Bye player
+                    return `<td style="color: var(--text-main);">${val}</td>`;
                 } else {
                     const par = config.pars?.[h] || config.defaultPar;
                     let colorClass = '';
@@ -191,7 +279,17 @@ function generateScoreboardHTML(players, config, scores) {
             }
             return '<td style="color: var(--text-muted); font-weight: 300;">-</td>';
         }).join('');
-        return `<tr>${scoreCells}</tr>`;
+
+        // For Match Play, add spacer after every pair (every 2 players)
+        const isMatchPlay = appState.gameType === GameTypes.MATCH_PLAY;
+        const playerIndex = players.indexOf(p);
+        const isEndOfPair = isMatchPlay && (playerIndex % 2 === 1) && (playerIndex < players.length - 1);
+
+        const spacerRow = isEndOfPair
+            ? `<tr class="sc-pair-spacer"><td colspan="${holes.length}"></td></tr>`
+            : '';
+
+        return `<tr>${scoreCells}</tr>${spacerRow}`;
     }).join('');
 
     // Right Table Header - Strictly 1 or 2 rows matching left side
@@ -459,6 +557,34 @@ class SetupView {
             };
         }
 
+        // Bingo mode: Randomize start order
+        if (newState.gameType === GameTypes.BINGO_BANGO_BONGO) {
+            for (let i = newState.players.length - 1; i > 0; i--) {
+                const j = Math.floor(Math.random() * (i + 1));
+                [newState.players[i], newState.players[j]] = [newState.players[j], newState.players[i]];
+            }
+        }
+
+        // Match Play mode: Create pairs
+        if (newState.gameType === GameTypes.MATCH_PLAY) {
+            const pairs = [];
+            for (let i = 0; i < newState.players.length; i += 2) {
+                if (i + 1 < newState.players.length) {
+                    pairs.push({
+                        player1Id: newState.players[i].id,
+                        player2Id: newState.players[i + 1].id
+                    });
+                } else {
+                    // Odd player - solo (bye)
+                    pairs.push({
+                        player1Id: newState.players[i].id,
+                        player2Id: null // No opponent
+                    });
+                }
+            }
+            newState.config.matchPlayData = { pairs };
+        }
+
         appState = newState;
         saveGame(appState);
         render();
@@ -643,6 +769,8 @@ class ScorecardView {
     render() {
         if (appState.gameType === GameTypes.WOLF) {
             this.renderWolfScoring();
+        } else if (appState.gameType === GameTypes.MATCH_PLAY) {
+            this.renderMatchPlayScoring();
         } else {
             this.renderStandardScoring();
         }
@@ -720,6 +848,96 @@ class ScorecardView {
         `;
     }
 
+    renderMatchPlayScoring() {
+        const currentHole = appState.currentHole;
+        const par = appState.config.pars?.[currentHole] || appState.config.defaultPar;
+        const isLastHole = currentHole === appState.config.holeCount;
+        const pairs = appState.config.matchPlayData?.pairs || [];
+
+        // Generate pair cards
+        const pairCardsHTML = pairs.map((pair, pairIndex) => {
+            const p1 = appState.players.find(p => p.id === pair.player1Id);
+            const p2 = pair.player2Id ? appState.players.find(p => p.id === pair.player2Id) : null;
+
+            const s1 = appState.scores[`${currentHole}_${pair.player1Id}`];
+            const s2 = pair.player2Id ? appState.scores[`${currentHole}_${pair.player2Id}`] : null;
+
+            // Hole winner for this hole
+            const holeWinner = getMatchPlayHoleWinner(pair, currentHole);
+
+            // Match status with holes remaining
+            const matchStatus = getMatchPlayStatus(pair);
+            const holesRemaining = appState.config.holeCount - currentHole + 1;
+            const leader = matchStatus.leaderId ? appState.players.find(p => p.id === matchStatus.leaderId)?.name : null;
+
+            // Check if match is clinched (lead > remaining holes)
+            const leadAmount = parseInt(matchStatus.status.replace(' UP', '')) || 0;
+            const isClinched = matchStatus.leaderId && leadAmount > holesRemaining;
+
+            let statusText;
+            let statusColor = 'var(--accent-primary)';
+            if (matchStatus.leaderId) {
+                statusText = `${leader}: ${matchStatus.status}, ${holesRemaining} left`;
+                if (isClinched) {
+                    statusText = `${leader} WINS! 🏆`;
+                    statusColor = 'var(--success)';
+                }
+            } else {
+                statusText = `All Square, ${holesRemaining} left`;
+            }
+
+            // Render player row helper
+            const renderMatchPlayerRow = (player, score, isWinner, opponentScore) => {
+                if (!player) return '';
+
+                let scoreColor = 'var(--text-main)';
+                if (score !== undefined && opponentScore !== undefined) {
+                    if (score < opponentScore) scoreColor = 'var(--success)';
+                    if (score > opponentScore) scoreColor = 'var(--danger)';
+                }
+
+                const winnerBadge = isWinner === player.id
+                    ? '<span style="color: var(--success); margin-left: 8px;">✓</span>'
+                    : (isWinner === 'halved' ? '<span style="color: var(--text-muted); margin-left: 8px;">½</span>' : '');
+
+                return `
+                    <div style="display: flex; align-items: center; justify-content: space-between; padding: 8px 0; border-bottom: 1px solid rgba(255,255,255,0.05);">
+                        <div style="display: flex; align-items: center; gap: 8px;">
+                            <span style="font-weight: 600;">${player.name}</span>
+                            ${winnerBadge}
+                        </div>
+                        <div class="flex-center gap-sm">
+                            <button class="btn btn-icon score-btn" data-id="${player.id}" data-action="dec" style="background: rgba(255,255,255,0.1); width: 40px; height: 40px;">−</button>
+                            <div class="score-display" data-id="${player.id}" style="font-size: 1.4rem; font-weight: 800; width: 36px; text-align: center; color: ${scoreColor};">${score !== undefined ? score : '-'}</div>
+                            <button class="btn btn-icon score-btn" data-id="${player.id}" data-action="inc" style="background: rgba(255,255,255,0.1); width: 40px; height: 40px;">+</button>
+                        </div>
+                    </div>
+                `;
+            };
+
+            return `
+                <div class="glass-panel" style="padding: var(--spacing-sm); margin-bottom: var(--spacing-sm);">
+                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; padding-bottom: 8px; border-bottom: 1px solid rgba(255,255,255,0.1);">
+                        <span style="font-size: 0.8rem; color: var(--text-muted);">Match ${pairIndex + 1}</span>
+                        <span style="font-size: 0.85rem; font-weight: 600; color: ${statusColor};">${statusText}</span>
+                    </div>
+                    ${renderMatchPlayerRow(p1, s1, holeWinner, s2)}
+                    ${p2 ? renderMatchPlayerRow(p2, s2, holeWinner, s1) : '<div style="padding: 8px 0; color: var(--text-muted); font-style: italic;">Bye</div>'}
+                </div>
+            `;
+        }).join('');
+
+        this.container.innerHTML = `
+            <div class="scorecard-container fade-in">
+                ${this.renderHeader(par, 'Match Play')}
+                <div class="player-scores" style="display: flex; flex-direction: column; gap: var(--spacing-xs); margin-bottom: var(--spacing-lg);">
+                    ${pairCardsHTML}
+                </div>
+                ${this.renderNavigation(isLastHole)}
+            </div>
+        `;
+    }
+
     renderHeader(par, subtitle = null, extra = '') {
         const subLabel = subtitle || GameTypeDetails[appState.gameType].label;
         return `
@@ -787,13 +1005,97 @@ class ScorecardView {
     renderPlayerRow(player) {
         const scoreKey = `${appState.currentHole}_${player.id}`;
         const par = appState.config.pars?.[appState.currentHole] || appState.config.defaultPar;
-        // Explicitly get the score, allowing undefined
-        const currentScore = appState.scores[scoreKey];
+        const currentScore = appState.scores[scoreKey]; // Can be undefined
 
         // Use Global Helper
         const totalScore = calculateTotal(player.id);
-        const totalStrokes = calculateTotalStrokes(player.id);
 
+        // --- BINGO BANGO BONGO RENDERING ---
+        if (appState.gameType === GameTypes.BINGO_BANGO_BONGO) {
+            // currentScore is 0-3 int basically. 
+            // We need to know WHICH points they have?
+            // Ah, wait. If we just store a number '3', we don't know if it's Bingo+Bango+Bongo or just 3 points.
+            // But the rules say: 1 pt for Bingo, 1 for Bango, 1 for Bongo.
+            // User input requires knowing WHICH ones.
+            // So `appState.scores` for this mode should probably be a bitmask or object?
+            // OR, simplier: we rely on the specific points?
+            // Let's use string keys in `appState.scores`? No, schema expects numbers usually.
+            // BITMASK: 1=Bingo, 2=Bango, 4=Bongo.
+            // Score = Total.
+            // Wait, if I change the storage format, `calculateTotal` might break if it expects simple sum?
+            // Actually, `calculateTotal` just sums the values.
+            // If I store "7" (1+2+4), then the total score is 7. That's WRONG.
+            // The total score should be 3.
+            // So I can't store the bitmask directly as the score if I want `calculateTotal` to just work by summing.
+            //
+            // Pivot: Use a separate data structure for "Point Details" or encode it?
+            // Standard Score: Just the INTEGER (0, 1, 2, 3).
+            // BUT mapping toggles to that integer is lossy (Did they get Bingo or Bango?).
+            // Does it matter? "Order of play matters...".
+            // If I just store "1", I don't know IF it was Bingo.
+            // Does the user care later? Maybe not.
+            // BUT the user interface needs to show WHICH toggle is active.
+            //
+            // SOLUTION: Store the bitmask in `appState.scores` but update `calculateTotal` to count bits.
+            // 1 (Bingo) -> 1 pt
+            // 2 (Bango) -> 1 pt
+            // 4 (Bongo) -> 1 pt
+            // 3 (Bingo + Bango) -> 2 pts
+            // 7 (All) -> 3 pts.
+
+            // I need to update `calculateTotal` slightly to handle this bitmask or just use a helper "countSetBits".
+            // Let's verify calculateTotal again. It just does `total += val`.
+            // So if I store 7, user gets 7 points. BAD.
+
+            // Okay, I will store the score as the proper INT (0-3).
+            // AND I will store the *breakdown* in `wolfData` or a new `holeData`?
+            // `wolfData` is specific name but generic structure? `history`?
+            // Or just use `appState.scores` for the POINT TOTAL, and maybe local state for the UI?
+            // No, persistence.
+
+            // Let's use `appState.scores` to store the BITMASK (1, 2, 4).
+            // And fixing `calculateTotal` is trivial. I'll do that in a follow-up step.
+
+            const mask = currentScore || 0;
+            const hasBingo = (mask & 1) !== 0; // 001
+            const hasBango = (mask & 2) !== 0; // 010
+            const hasBongo = (mask & 4) !== 0; // 100
+
+            // Subtitle: Just Total Points (Raw Number)
+            return `
+                <div class="glass-panel" style="padding: var(--spacing-sm); display: flex; align-items: center; justify-content: space-between;">
+                    <div style="flex: 1;">
+                        <div style="font-weight: 700; font-size: 1.1rem;">${player.name}</div>
+                        <div class="subtitle" style="font-size: 0.8rem; height: 1.2em;" id="total-subtitle-${player.id}">
+                            Points: ${totalScore}
+                        </div>
+                    </div>
+                    
+                    <div class="flex-center gap-xs">
+                        <button class="btn btn-sm ${hasBingo ? 'btn-primary' : 'btn-ghost'} bingo-btn" 
+                                data-id="${player.id}" data-type="1"
+                                onclick="toggleBingoPoint('${player.id}', 1)"
+                                style="width: auto; padding: 0 12px; border: 1px solid var(--card-border); font-size: 0.8rem;">
+                            BINGO
+                        </button>
+                        <button class="btn btn-sm ${hasBango ? 'btn-primary' : 'btn-ghost'} bingo-btn" 
+                                data-id="${player.id}" data-type="2"
+                                onclick="toggleBingoPoint('${player.id}', 2)"
+                                style="width: auto; padding: 0 12px; border: 1px solid var(--card-border); font-size: 0.8rem;">
+                            BANGO
+                        </button>
+                        <button class="btn btn-sm ${hasBongo ? 'btn-primary' : 'btn-ghost'} bingo-btn" 
+                                data-id="${player.id}" data-type="4"
+                                onclick="toggleBingoPoint('${player.id}', 4)"
+                                style="width: auto; padding: 0 12px; border: 1px solid var(--card-border); font-size: 0.8rem;">
+                            BONGO
+                        </button>
+                    </div>
+                </div>
+            `;
+        }
+
+        const totalStrokes = calculateTotalStrokes(player.id);
         let scoreColor = 'var(--text-main)';
         let displayScore = '-';
 
@@ -802,19 +1104,44 @@ class ScorecardView {
             if (currentScore < par) scoreColor = 'var(--success)';
             if (currentScore > par) scoreColor = 'var(--danger)';
         } else {
-            scoreColor = 'var(--text-muted)';
+            scoreColor = 'var(--text-muted)'; // Default gray for unset
         }
+
+        // FORMATTING: Check if we are in a Points Mode where strokes don't matter relative to par in the same way
+        // Wolf, BirdieOrDie, BingoBangoBongo are Point games. Standard is Stroke game.
+        // Actually BirdieOrDie is points, but derived from strokes. 
+        // Wolf is points.
+        // Bingo is points.
+        // Standard is Relative to Par.
+
+        const isPointsMode = appState.gameType === GameTypes.WOLF ||
+            appState.gameType === GameTypes.BIRDIE_OR_DIE ||
+            appState.gameType === GameTypes.BINGO_BANGO_BONGO;
+
+        let totalDisplay = '';
+        if (isPointsMode) {
+            // Just show the raw number. No +/-
+            totalDisplay = `${totalScore}`;
+        } else {
+            // Standard formatting
+            if (totalScore > 0) totalDisplay = `+${totalScore}`;
+            else if (totalScore === 0) totalDisplay = 'E';
+            else totalDisplay = `${totalScore}`;
+        }
+
+        // Wolf/Bingo don't usually use this code path (they return Early), but BirdieOrDie DOES.
+        // And standard falls through.
 
         return `
             <div class="glass-panel" style="padding: var(--spacing-sm); display: flex; align-items: center; justify-content: space-between;">
                 <div style="flex: 1;">
                     <div style="font-weight: 700; font-size: 1.1rem;">${player.name}</div>
-                    <div class="subtitle" style="font-size: 0.8rem;">Score: ${totalScore > 0 ? '+' + totalScore : totalScore} (Total: ${totalStrokes})</div>
+                    <div class="subtitle" style="font-size: 0.8rem;" id="total-subtitle-${player.id}">Score: ${totalDisplay} (Total: ${totalStrokes})</div>
                 </div>
                 
                 <div class="flex-center gap-sm">
                     <button class="btn btn-icon score-btn" data-id="${player.id}" data-action="dec" style="background: rgba(255,255,255,0.1); width: 44px; height: 44px;">−</button>
-                    <div style="font-size: 1.5rem; font-weight: 800; width: 40px; text-align: center; color: ${scoreColor};">${displayScore}</div>
+                    <div class="score-display" data-id="${player.id}" style="font-size: 1.5rem; font-weight: 800; width: 40px; text-align: center; color: ${scoreColor};">${displayScore}</div>
                     <button class="btn btn-icon score-btn" data-id="${player.id}" data-action="inc" style="background: rgba(255,255,255,0.1); width: 44px; height: 44px;">+</button>
                 </div>
             </div>
@@ -847,6 +1174,81 @@ class ScorecardView {
         }
     }
 
+    /**
+     * Update Match Play score display without full re-render
+     */
+    updateMatchPlayScore(playerId, score, par) {
+        // Update the score display number
+        const scoreDisplay = this.container.querySelector(`.score-display[data-id="${playerId}"]`);
+        if (scoreDisplay) {
+            scoreDisplay.textContent = score;
+
+            // Find opponent and their score to determine color
+            const pairs = appState.config.matchPlayData?.pairs || [];
+            const pair = pairs.find(p => p.player1Id === playerId || p.player2Id === playerId);
+            if (pair && pair.player2Id) {
+                const opponentId = pair.player1Id === playerId ? pair.player2Id : pair.player1Id;
+                const opponentScore = appState.scores[`${appState.currentHole}_${opponentId}`];
+
+                let scoreColor = 'var(--text-main)';
+                if (opponentScore !== undefined) {
+                    if (score < opponentScore) scoreColor = 'var(--success)';
+                    else if (score > opponentScore) scoreColor = 'var(--danger)';
+                }
+                scoreDisplay.style.color = scoreColor;
+
+                // Update opponent's color too
+                const opponentDisplay = this.container.querySelector(`.score-display[data-id="${opponentId}"]`);
+                if (opponentDisplay) {
+                    let oppColor = 'var(--text-main)';
+                    if (opponentScore !== undefined) {
+                        if (opponentScore < score) oppColor = 'var(--success)';
+                        else if (opponentScore > score) oppColor = 'var(--danger)';
+                    }
+                    opponentDisplay.style.color = oppColor;
+                }
+
+                // Update winner indicators
+                const holeWinner = getMatchPlayHoleWinner(pair, appState.currentHole);
+                this.container.querySelectorAll('.mp-winner-badge').forEach(b => b.remove());
+
+                if (holeWinner && holeWinner !== 'halved') {
+                    const winnerRow = this.container.querySelector(`.score-btn[data-id="${holeWinner}"]`)?.closest('div[style*="border-bottom"]');
+                    if (winnerRow) {
+                        const nameSpan = winnerRow.querySelector('span[style*="font-weight: 600"]');
+                        if (nameSpan && !nameSpan.querySelector('.mp-winner-badge')) {
+                            nameSpan.insertAdjacentHTML('afterend', '<span class="mp-winner-badge" style="color: var(--success); margin-left: 8px;">✓</span>');
+                        }
+                    }
+                } else if (holeWinner === 'halved') {
+                    // Add halved indicator to both
+                    [pair.player1Id, pair.player2Id].forEach(pid => {
+                        const row = this.container.querySelector(`.score-btn[data-id="${pid}"]`)?.closest('div[style*="border-bottom"]');
+                        if (row) {
+                            const nameSpan = row.querySelector('span[style*="font-weight: 600"]');
+                            if (nameSpan && !nameSpan.querySelector('.mp-winner-badge')) {
+                                nameSpan.insertAdjacentHTML('afterend', '<span class="mp-winner-badge" style="color: var(--text-muted); margin-left: 8px;">½</span>');
+                            }
+                        }
+                    });
+                }
+
+                // Update match status text
+                const matchStatus = getMatchPlayStatus(pair);
+                const p1 = appState.players.find(p => p.id === pair.player1Id);
+                const leader = matchStatus.leaderId ? appState.players.find(p => p.id === matchStatus.leaderId)?.name : null;
+                const statusText = matchStatus.leaderId
+                    ? `${leader}: ${matchStatus.status}`
+                    : matchStatus.status;
+
+                const statusEl = this.container.querySelector(`.glass-panel`)?.querySelector('span[style*="color: var(--accent-primary)"]');
+                if (statusEl) {
+                    statusEl.textContent = statusText;
+                }
+            }
+        }
+    }
+
     attachEvents() {
         // Standard Score Inputs
         this.container.querySelectorAll('.score-btn').forEach(btn => {
@@ -867,9 +1269,15 @@ class ScorecardView {
                 }
 
                 appState.scores[scoreKey] = currentScore;
+                saveGame(appState);
 
-                // Update just the player's row instead of full re-render
-                this.updatePlayerScore(playerId, currentScore, par);
+                // Match Play: Update score display and status without full re-render
+                if (appState.gameType === GameTypes.MATCH_PLAY) {
+                    this.updateMatchPlayScore(playerId, currentScore, par);
+                } else {
+                    // Update just the player's row instead of full re-render
+                    this.updatePlayerScore(playerId, currentScore, par);
+                }
             });
         });
 
@@ -915,6 +1323,12 @@ class ScorecardView {
                 // Wolf Mode: Calculate points before advancing
                 if (appState.gameType === GameTypes.WOLF) {
                     this.calculateWolfPoints();
+                }
+
+                // Bingo Mode: Rotate players (Round Robin)
+                if (appState.gameType === GameTypes.BINGO_BANGO_BONGO) {
+                    const first = appState.players.shift();
+                    appState.players.push(first);
                 }
 
                 appState.currentHole++;
@@ -1015,33 +1429,86 @@ class RoundSummaryView {
 
     render() {
         const isWolfMode = appState.gameType === GameTypes.WOLF;
+        const isMatchPlay = appState.gameType === GameTypes.MATCH_PLAY;
 
-        const players = appState.players.map(p => ({
-            ...p,
-            totalScore: calculateTotal(p.id),
-            totalStrokes: calculateTotalStrokes(p.id)
-        })).sort((a, b) => {
-            // Wolf: highest points wins. Standard: lowest score wins.
-            return isWolfMode ? b.totalScore - a.totalScore : a.totalScore - b.totalScore;
-        });
+        let winnerText, subtitle, headerEmoji;
 
-        // Find Ties
-        const winningScore = players[0].totalScore;
-        const winners = players.filter(p => p.totalScore === winningScore);
-        const isTie = winners.length > 1;
+        if (isMatchPlay) {
+            // Match Play: Show results for each pair
+            const pairs = appState.config.matchPlayData?.pairs || [];
+            const matchResults = pairs.map(pair => {
+                const p1 = appState.players.find(p => p.id === pair.player1Id);
+                const p2 = pair.player2Id ? appState.players.find(p => p.id === pair.player2Id) : null;
+                const status = getMatchPlayStatus(pair);
 
-        let winnerText = `Winner: <span style="color: var(--accent-primary)">${winners[0].name}</span>`;
-        if (isTie) {
-            const names = winners.map(w => w.name).join(' & ');
-            winnerText = `Draw! <span style="font-size:1.5rem; display:block; margin-top:8px; color: var(--accent-primary)">${names}</span>`;
-        }
+                if (!p2) {
+                    return { winner: p1, status: 'Bye', isTie: false };
+                }
 
-        // Subtitle: Points for Wolf, +/- (Strokes) for standard
-        let subtitle;
-        if (isWolfMode) {
-            subtitle = `${winners[0].totalScore} Points`;
+                if (status.leaderId) {
+                    const winner = appState.players.find(p => p.id === status.leaderId);
+                    return { winner, status: status.status, isTie: false, loser: status.leaderId === pair.player1Id ? p2 : p1 };
+                }
+                return { winner: null, status: 'All Square', isTie: true, p1, p2 };
+            });
+
+            // Generate summary
+            const resultsHTML = matchResults.map((r, i) => {
+                if (r.isTie) {
+                    return `<div style="margin-bottom: 8px;"><strong>Match ${i + 1}:</strong> ${r.p1.name} & ${r.p2.name} - <span style="color: var(--text-muted);">Tied</span></div>`;
+                } else if (r.status === 'Bye') {
+                    return `<div style="margin-bottom: 8px;"><strong>Match ${i + 1}:</strong> ${r.winner.name} - <span style="color: var(--text-muted);">Bye</span></div>`;
+                } else {
+                    return `<div style="margin-bottom: 8px;"><strong>Match ${i + 1}:</strong> <span style="color: var(--accent-primary);">${r.winner.name}</span> wins ${r.status}</div>`;
+                }
+            }).join('');
+
+            // Overall summary
+            const matchWinners = matchResults.filter(r => r.winner && !r.isTie && r.status !== 'Bye');
+            const ties = matchResults.filter(r => r.isTie);
+
+            if (matchWinners.length === 0 && ties.length > 0) {
+                headerEmoji = '🤝';
+                winnerText = 'All Matches Tied!';
+            } else if (matchWinners.length === 1) {
+                headerEmoji = '🏆';
+                winnerText = `<span style="color: var(--accent-primary)">${matchWinners[0].winner.name}</span> Wins!`;
+            } else {
+                headerEmoji = '🏆';
+                winnerText = 'Match Results';
+            }
+
+            subtitle = resultsHTML;
         } else {
-            subtitle = `${winners[0].totalScore > 0 ? '+' : ''}${winners[0].totalScore} (${winners[0].totalStrokes} Strokes)`;
+            // Standard/Wolf/Other modes
+            const players = appState.players.map(p => ({
+                ...p,
+                totalScore: calculateTotal(p.id),
+                totalStrokes: calculateTotalStrokes(p.id)
+            })).sort((a, b) => {
+                // Wolf: highest points wins. Standard: lowest score wins.
+                return isWolfMode ? b.totalScore - a.totalScore : a.totalScore - b.totalScore;
+            });
+
+            // Find Ties
+            const winningScore = players[0].totalScore;
+            const winners = players.filter(p => p.totalScore === winningScore);
+            const isTie = winners.length > 1;
+
+            winnerText = `Winner: <span style="color: var(--accent-primary)">${winners[0].name}</span>`;
+            if (isTie) {
+                const names = winners.map(w => w.name).join(' & ');
+                winnerText = `Draw! <span style="font-size:1.5rem; display:block; margin-top:8px; color: var(--accent-primary)">${names}</span>`;
+            }
+
+            headerEmoji = isTie ? '🤝' : '🏆';
+
+            // Subtitle: Points for Wolf, +/- (Strokes) for standard
+            if (isWolfMode) {
+                subtitle = `${winners[0].totalScore} Points`;
+            } else {
+                subtitle = `${winners[0].totalScore > 0 ? '+' : ''}${winners[0].totalScore} (${winners[0].totalStrokes} Strokes)`;
+            }
         }
 
         const scoreboardHTML = generateScoreboardHTML(appState.players, appState.config, appState.scores);
@@ -1050,9 +1517,9 @@ class RoundSummaryView {
             <div class="summary-container fade-in p-4" style="padding-bottom: 60px;">
                  <header style="text-align: center; margin-bottom: var(--spacing-lg)">
                     <h1>Round Complete!</h1>
-                    <div style="font-size: 3rem; margin: var(--spacing-md) 0;">${isTie ? '🤝' : '🏆'}</div>
+                    <div style="font-size: 3rem; margin: var(--spacing-md) 0;">${headerEmoji}</div>
                     <h2>${winnerText}</h2>
-                    <p class="subtitle">${subtitle}</p>
+                    <div class="subtitle" style="margin-top: 8px;">${subtitle}</div>
                 </header>
 
                 <div class="glass-panel" style="margin-bottom: var(--spacing-lg); padding: var(--spacing-sm);">
@@ -1335,6 +1802,10 @@ class PlayerManagerModal extends Modal {
                 </div>
             </div>
 
+            <div style="display: flex; justify-content: flex-end; margin-bottom: var(--spacing-xs);">
+                 <button id="shuffle-p-btn" class="btn btn-sm btn-ghost" style="color: var(--accent-secondary); border: 1px solid var(--card-border);">🔀 Shuffle Order</button>
+            </div>
+
             <div id="modal-player-list" style="display: flex; flex-direction: column; gap: var(--spacing-xs); margin-bottom: var(--spacing-md); max-height: 50vh; overflow-y: auto;">
                 ${renderList()}
             </div>
@@ -1345,6 +1816,14 @@ class PlayerManagerModal extends Modal {
         // Events
         const listEl = this.backdrop.querySelector('#modal-player-list');
         const inputEl = this.backdrop.querySelector('#new-player-name');
+
+        // Shuffle Button
+        this.backdrop.querySelector('#shuffle-p-btn').addEventListener('click', () => {
+            if (window.randomizePlayerOrder) {
+                window.randomizePlayerOrder(); // This saves and calls render()
+                listEl.innerHTML = renderList(); // Re-render local list
+            }
+        });
 
         this.backdrop.querySelector('#add-p-btn').addEventListener('click', () => {
             const name = inputEl.value.trim();
@@ -1760,10 +2239,90 @@ class RulesModal extends Modal {
             </div>
         `;
 
+        // Bingo Bango Bongo rules content
+        const bingoRules = `
+            <div style="text-align: left; line-height: 1.6; font-size: 0.9rem;">
+                <div style="margin-bottom: 14px;">
+                    <strong style="color: var(--accent-primary);">🎯 Goal</strong>
+                    <p style="color: var(--text-muted); margin: 4px 0 0 0;">
+                        Earn points by achieving three specific goals on each hole.
+                    </p>
+                </div>
+                
+                <div style="margin-bottom: 14px;">
+                    <strong style="color: var(--accent-primary);">3 Points per Hole</strong>
+                    <ul style="margin: 6px 0 0 16px; padding: 0; color: var(--text-muted);">
+                        <li><strong style="color: var(--accent-primary);">BINGO</strong>: Longest drive.</li>
+                        <li><strong style="color: var(--accent-primary);">BANGO</strong>: Closest to the pin on the approach shot (usually the second shot).</li>
+                        <li><strong style="color: var(--accent-primary);">BONGO</strong>: First player to hole out.</li>
+                    </ul>
+                </div>
+
+                <div style="margin-bottom: 14px;">
+                    <strong style="color: var(--accent-primary);">📜 Order of Play</strong>
+                    <p style="color: var(--text-muted); margin: 4px 0 0 0;">
+                        <strong>Strict order matters!</strong> The player furthest from the hole always throws first.
+                    </p>
+                    <ul style="margin: 6px 0 0 16px; padding: 0; color: var(--text-muted);">
+                        <li><strong>Drive:</strong> Randomize order on first tee.</li>
+                        <li><strong>Next Shots:</strong> Always furthest out. This gives everyone a fair chance at <em>Bongo</em>.</li>
+                    </ul>
+                </div>
+                
+                <div style="margin-bottom: 0; padding: 10px; background: rgba(255,255,255,0.05); border-radius: 8px;">
+                    <strong style="color: var(--accent-secondary);">💡 Bonus Points (Throw-ins)</strong>
+                    <p style="color: var(--text-muted); margin: 4px 0 0 0; font-size: 0.85rem;">
+                        A player who throws in from the field takes the <strong>remainder of the points</strong> for that hole:
+                    </p>
+                    <ul style="margin: 4px 0 0 16px; padding: 0; color: var(--text-muted); font-size: 0.85rem;">
+                        <li><strong>Ace</strong>: Takes ALL 3 points (Bingo + Bango + Bongo).</li>
+                        <li><strong>2nd Shot Throw-in</strong>: Takes 2 points (Bango + Bongo).</li>
+                    </ul>
+                </div>
+            </div>
+        `;
+
+        // Match Play rules content
+        const matchRules = `
+            <div style="text-align: left; line-height: 1.6; font-size: 0.9rem;">
+                <div style="margin-bottom: 14px;">
+                    <strong style="color: var(--accent-primary);">⚔️ Goal</strong>
+                    <p style="color: var(--text-muted); margin: 4px 0 0 0;">
+                        Compete head-to-head against your opponent. Win more holes to win the match!
+                    </p>
+                </div>
+                
+                <div style="margin-bottom: 14px;">
+                    <strong style="color: var(--accent-primary);">🏆 Hole Scoring</strong>
+                    <ul style="margin: 6px 0 0 16px; padding: 0; color: var(--text-muted);">
+                        <li><strong>Lower strokes wins the hole</strong> → 1 point.</li>
+                        <li><strong>Equal strokes</strong> → Hole is "Halved" (no points).</li>
+                    </ul>
+                </div>
+
+                <div style="margin-bottom: 14px;">
+                    <strong style="color: var(--accent-primary);">📊 Match Status</strong>
+                    <p style="color: var(--text-muted); margin: 4px 0 0 0;">
+                        Track who is ahead: <strong>"2 UP"</strong> means that player has won 2 more holes than their opponent.
+                        <strong>"All Square"</strong> means tied.
+                    </p>
+                </div>
+                
+                <div style="margin-bottom: 0; padding: 10px; background: rgba(255,255,255,0.05); border-radius: 8px;">
+                    <strong style="color: var(--accent-secondary);">💡 Winning</strong>
+                    <p style="color: var(--text-muted); margin: 4px 0 0 0; font-size: 0.85rem;">
+                        A match is won when a player is "UP" more holes than remain to be played.
+                    </p>
+                </div>
+            </div>
+        `;
+
         // Select appropriate rules
         let rulesContent = defaultRules;
         if (gameType === GameTypes.WOLF) rulesContent = wolfRules;
         else if (gameType === GameTypes.BIRDIE_OR_DIE) rulesContent = birdieRules;
+        else if (gameType === GameTypes.BINGO_BANGO_BONGO) rulesContent = bingoRules;
+        else if (gameType === GameTypes.MATCH_PLAY) rulesContent = matchRules;
 
         super(`
             <h2 style="margin-bottom: var(--spacing-md)">
@@ -1777,6 +2336,148 @@ class RulesModal extends Modal {
 
         this.backdrop.querySelector('#close-rules-btn').addEventListener('click', () => this.close());
     }
+}
+
+/* --- Bingo Bango Bongo Logic --- */
+window.toggleBingoPoint = function (playerId, pointType) {
+    // pointType values: 1 (Bingo), 2 (Bango), 4 (Bongo)
+
+    // 1. Get current state
+    const currentHole = appState.currentHole;
+    const scoreKey = `${currentHole}_${playerId}`;
+    let currentMask = appState.scores[scoreKey] || 0;
+
+    // 2. Toggle the bit 
+    // If the player already has this point, we are removing it (isAdding = false).
+    // If they don't have it, we are adding it (isAdding = true).
+    const isAdding = (currentMask & pointType) === 0;
+
+    if (isAdding) {
+        // Enforce Mutual Exclusivity: 
+        // Iterate ALL players and remove this specific pointType if they have it.
+        appState.players.forEach(p => {
+            if (p.id === playerId) return;
+
+            const pKey = `${currentHole}_${p.id}`;
+            let pMask = appState.scores[pKey] || 0;
+
+            if ((pMask & pointType) !== 0) {
+                // Remove it from the other player
+                pMask &= ~pointType;
+                appState.scores[pKey] = pMask;
+
+                // Update that player's specific row buttons if needed
+                // But full render is safer to ensure consistency
+            }
+        });
+
+        // Add to current player
+        currentMask |= pointType;
+    } else {
+        // Just remove it from current player
+        currentMask &= ~pointType;
+    }
+
+    // 3. Save
+    appState.scores[scoreKey] = currentMask;
+    saveGame(appState);
+
+    // 4. Efficient Update (Targeted DOM)
+    // We update all buttons because of mutual exclusivity (one player's toggle affects others).
+    // Instead of full render(), we just update the specific elements.
+    if (window.updateBingoDOM) {
+        window.updateBingoDOM();
+    } else {
+        render(); // Fallback if helper missing
+    }
+};
+
+window.updateBingoDOM = function () {
+    const currentHole = appState.currentHole;
+
+    appState.players.forEach(p => {
+        // 1. Get Score/Mask
+        const scoreKey = `${currentHole}_${p.id}`;
+        const mask = appState.scores[scoreKey] || 0;
+
+        // 2. Update Buttons
+        const btnBingo = document.querySelector(`.bingo-btn[data-id="${p.id}"][data-type="1"]`);
+        const btnBango = document.querySelector(`.bingo-btn[data-id="${p.id}"][data-type="2"]`);
+        const btnBongo = document.querySelector(`.bingo-btn[data-id="${p.id}"][data-type="4"]`);
+
+        const setBtnState = (btn, isSet) => {
+            if (btn) {
+                if (isSet) {
+                    btn.classList.remove('btn-ghost');
+                    btn.classList.add('btn-primary');
+                } else {
+                    btn.classList.remove('btn-primary');
+                    btn.classList.add('btn-ghost');
+                }
+            }
+        };
+
+        setBtnState(btnBingo, (mask & 1) !== 0);
+        setBtnState(btnBango, (mask & 2) !== 0);
+        setBtnState(btnBongo, (mask & 4) !== 0);
+
+        // 3. Update Subtitle Total Points
+        const totalScore = calculateTotal(p.id);
+        const subEl = document.getElementById(`total-subtitle-${p.id}`);
+        if (subEl) {
+            subEl.innerText = `Points: ${totalScore}`;
+        }
+    });
+};
+
+window.randomizePlayerOrder = function () {
+    // Fisher-Yates Shuffle for the appState.players array
+    for (let i = appState.players.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [appState.players[i], appState.players[j]] = [appState.players[j], appState.players[i]];
+    }
+    saveGame(appState);
+    render();
+
+    // Feedback
+    // Ideally we'd show a toast, but restart is obvious enough.
+};
+
+/* --- Match Play Helpers --- */
+/**
+ * Get the winner of a specific hole for a pair.
+ * @returns {string|null} player1Id, player2Id, 'halved', or null (incomplete)
+ */
+function getMatchPlayHoleWinner(pair, hole) {
+    if (!pair.player2Id) return pair.player1Id; // Bye - P1 wins by default
+
+    const s1 = appState.scores[`${hole}_${pair.player1Id}`];
+    const s2 = appState.scores[`${hole}_${pair.player2Id}`];
+
+    if (s1 === undefined || s2 === undefined) return null; // Incomplete
+    if (s1 < s2) return pair.player1Id;
+    if (s2 < s1) return pair.player2Id;
+    return 'halved';
+}
+
+/**
+ * Get the current match status for a pair.
+ * @returns {{ status: string, leaderId: string|null, p1Wins: number, p2Wins: number }}
+ */
+function getMatchPlayStatus(pair) {
+    let p1Wins = 0, p2Wins = 0;
+
+    for (let h = 1; h <= appState.config.holeCount; h++) {
+        const winner = getMatchPlayHoleWinner(pair, h);
+        if (winner === pair.player1Id) p1Wins++;
+        else if (winner === pair.player2Id) p2Wins++;
+        // 'halved' and null don't affect count
+    }
+
+    const diff = p1Wins - p2Wins;
+    if (diff === 0) return { status: 'All Square', leaderId: null, p1Wins, p2Wins };
+    if (diff > 0) return { status: `${diff} UP`, leaderId: pair.player1Id, p1Wins, p2Wins };
+    return { status: `${Math.abs(diff)} UP`, leaderId: pair.player2Id, p1Wins, p2Wins };
 }
 
 /* Initial Render */
